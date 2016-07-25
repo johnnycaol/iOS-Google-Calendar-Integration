@@ -17,7 +17,7 @@ class ViewController: UIViewController {
     
     // If modifying these scopes, delete your previously saved credentials by
     // resetting the iOS simulator or uninstall the app.
-    private let scopes = [kGTLAuthScopeCalendarReadonly]
+    private let scopes = [kGTLAuthScopeCalendar]
     private let service = GTLServiceCalendar()
     
     let output = UITextView()
@@ -48,7 +48,17 @@ class ViewController: UIViewController {
     override func viewDidAppear(animated: Bool) {
         if let authorizer = service.authorizer,
             canAuth = authorizer.canAuthorize where canAuth {
-            fetchEvents()
+            //getEvent("nb4e7lbuve74h6m0hhncs52r9s")
+            //updateEvent("nb4e7lbuve74h6m0hhncs52r9s", "This event has been updated.")
+            createEvent("johnny@soapboxhq.com",
+                   participantEmail: "justin@soapboxhq.com",
+                   startDate: NSDate(),
+                   endDate: NSDate(timeInterval: 60*60*3, sinceDate: NSDate()),
+                   summary: "New 1 on 1 for August",
+                   recurrenceRule: "RRULE:FREQ=DAILY;COUNT=3"
+            )
+            //fetchEvents("johnny@soapboxhq.com", participantEmail: "graham@soapboxhq.com")
+            //deleteEvent("nb4e7lbuve74h6m0hhncs52r9s")
         } else {
             presentViewController(
                 createAuthController(),
@@ -58,68 +68,138 @@ class ViewController: UIViewController {
         }
     }
     
-    // Construct a query and get a list of upcoming events from the user calendar
-    func fetchEvents() {
+    // Fetch a list of upcoming 1:1 events from the user calendar
+    func fetchEvents(userEmail: String, participantEmail: String) {
         let query = GTLQueryCalendar.queryForEventsListWithCalendarId("primary")
         query.maxResults = 20
         query.timeMin = GTLDateTime(date: NSDate(), timeZone: NSTimeZone.localTimeZone())
         query.singleEvents = true
-        query.q = "1:1 johnny@soapboxhq.com justin@soapboxhq.com"//append the current user's email and the colleague's email
+        query.q = "1:1 \(userEmail) \(participantEmail)"//append the current user's email and the colleague's email
         query.orderBy = kGTLCalendarOrderByStartTime //comment this out as it doesn't work with singleEvents = false
+
         service.executeQuery(
             query,
             delegate: self,
-            didFinishSelector: "displayResultWithTicket:finishedWithObject:error:"
+            didFinishSelector: #selector(ViewController.displayResultWithTicket(_:finishedWithObject:error:))
         )
     }
     
-    func createEvent() {
-        let event = GTLCalendarEvent()
-        event.summary = "Amazing event"
-        event.start = //TODO: add date here
-        let query = GTLQueryCalendar.queryForEventsInsertWithObject(event, calendarId: "primary")
+    // Get an event by id
+    func getEvent(eventId: String) {
+        let query = GTLQueryCalendar.queryForEventsGetWithCalendarId("primary", eventId: eventId)
+        
+        service.executeQuery(
+            query,
+            delegate: self,
+            didFinishSelector: #selector(ViewController.displayResultSingle(_:finishedWithObject:error:))
+        )
     }
     
-    /*
-     Event event = new Event()
-     .setSummary("Google I/O 2015")
-     .setLocation("800 Howard St., San Francisco, CA 94103")
-     .setDescription("A chance to hear more about Google's developer products.");
-     
-     DateTime startDateTime = new DateTime("2015-05-28T09:00:00-07:00");
-     EventDateTime start = new EventDateTime()
-     .setDateTime(startDateTime)
-     .setTimeZone("America/Los_Angeles");
-     event.setStart(start);
-     
-     DateTime endDateTime = new DateTime("2015-05-28T17:00:00-07:00");
-     EventDateTime end = new EventDateTime()
-     .setDateTime(endDateTime)
-     .setTimeZone("America/Los_Angeles");
-     event.setEnd(end);
-     
-     String[] recurrence = new String[] {"RRULE:FREQ=DAILY;COUNT=2"};
-     event.setRecurrence(Arrays.asList(recurrence));
-     
-     EventAttendee[] attendees = new EventAttendee[] {
-     new EventAttendee().setEmail("lpage@example.com"),
-     new EventAttendee().setEmail("sbrin@example.com"),
-     };
-     event.setAttendees(Arrays.asList(attendees));
-     
-     EventReminder[] reminderOverrides = new EventReminder[] {
-     new EventReminder().setMethod("email").setMinutes(24 * 60),
-     new EventReminder().setMethod("popup").setMinutes(10),
-     };
-     Event.Reminders reminders = new Event.Reminders()
-     .setUseDefault(false)
-     .setOverrides(Arrays.asList(reminderOverrides));
-     event.setReminders(reminders);
-     
-     String calendarId = "primary";
-     event = service.events().insert(calendarId, event).execute();
-     System.out.printf("Event created: %s\n", event.getHtmlLink());
-     */
+    // Create an event
+    // If the user create an event in app, create the event in Google Calendar First, then pull from Google Calendar, and then save to the app
+    func createEvent(userEmail: String, participantEmail: String, startDate: NSDate, endDate: NSDate, summary: String, recurrenceRule: String) {
+        let event = GTLCalendarEvent()
+        
+        event.start = GTLCalendarEventDateTime()
+        event.start.dateTime = GTLDateTime(date: startDate, timeZone: NSTimeZone.localTimeZone())
+        event.start.timeZone = NSTimeZone.localTimeZone().name
+        event.end = GTLCalendarEventDateTime()
+        event.end.dateTime = GTLDateTime(date: endDate, timeZone: NSTimeZone.localTimeZone())
+        event.end.timeZone = NSTimeZone.localTimeZone().name
+        event.summary = summary
+        event.recurrence = [recurrenceRule]
+        
+        let attendee1 = GTLCalendarEventAttendee()
+        let attendee2 = GTLCalendarEventAttendee()
+        attendee1.email = userEmail
+        attendee2.email = participantEmail
+        event.attendees = [attendee1, attendee2]
+        
+        let query = GTLQueryCalendar.queryForEventsInsertWithObject(event, calendarId: "primary")
+        
+        service.executeQuery(
+            query,
+            delegate: self,
+            didFinishSelector: #selector(ViewController.displayResultSingle(_:finishedWithObject:error:))
+        )
+    }
+    
+    // Update an event by id
+    func updateEvent(eventId: String, summary: String) {
+        let query = GTLQueryCalendar.queryForEventsGetWithCalendarId("primary", eventId: eventId)
+        service.executeQuery(query, completionHandler: { (ticket, event, error) -> Void in
+            if let error = error {
+                self.showAlert("Error", message: error.localizedDescription)
+            }
+            
+            let event = event as! GTLCalendarEvent
+            event.summary = summary
+            
+            let query = GTLQueryCalendar.queryForEventsUpdateWithObject(event, calendarId: "primary", eventId: eventId)
+            self.service.executeQuery(
+                query,
+                delegate: self,
+                didFinishSelector: #selector(ViewController.displayResultSingle(_:finishedWithObject:error:))
+            )
+        })
+    }
+    
+    // Delete an event by id
+    func deleteEvent(eventId: String) {
+        let query = GTLQueryCalendar.queryForEventsDeleteWithCalendarId("primary", eventId: eventId)
+        
+        service.executeQuery(query, completionHandler: { (ticket, event, error) -> Void in
+            if let error = error {
+                self.showAlert("Error", message: error.localizedDescription)
+            }
+        })
+    }
+    
+    func displayResultSingle(
+        ticket: GTLServiceTicket,
+        finishedWithObject event : GTLCalendarEvent,
+                           error : NSError?) {
+        
+        if let error = error {
+            showAlert("Error", message: error.localizedDescription)
+            return
+        }
+        
+        var eventString = ""
+                
+        let start : GTLDateTime! = event.start.dateTime ?? event.start.date
+        let startString = NSDateFormatter.localizedStringFromDate(
+            start.date,
+            dateStyle: .ShortStyle,
+            timeStyle: .ShortStyle
+        )
+        
+        let end : GTLDateTime! = event.end.dateTime ?? event.end.date
+        let endString = NSDateFormatter.localizedStringFromDate(
+            end.date,
+            dateStyle: .ShortStyle,
+            timeStyle: .ShortStyle
+        )
+        
+        print(event)
+        print("ID: " + event.identifier)
+        print("Start: " + startString)
+        print("End: " + endString)
+        if let recurringEventId = event.recurringEventId {
+            print("Recurring Event Id: \(recurringEventId)")//use this id to aggregate events from the same recurring event
+        }
+        
+        if let description = event.summary {
+            print("Description: \(description)")
+        }
+        
+        if let location = event.location {
+            print("Location: \(location)")
+        }
+        print("\n")
+        eventString += "\(startString) - \(event.summary)\n"
+        output.text = eventString
+    }
     
     // Display the start dates and event summaries in the UITextView
     func displayResultWithTicket(
@@ -153,8 +233,10 @@ class ViewController: UIViewController {
                 
                 print(event)
                 print("ID: " + event.identifier)
+                print(event.recurrence[0])
                 print("Start: " + startString)
                 print("End: " + endString)
+                
                 if let recurringEventId = event.recurringEventId {
                     print("Recurring Event Id: \(recurringEventId)")//use this id to aggregate events from the same recurring event
                 }
@@ -186,7 +268,7 @@ class ViewController: UIViewController {
             clientSecret: nil,
             keychainItemName: kKeychainItemName,
             delegate: self,
-            finishedSelector: "viewController:finishedWithAuth:error:"
+            finishedSelector: #selector(ViewController.viewController(_:finishedWithAuth:error:))
         )
     }
     
